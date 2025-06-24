@@ -48,7 +48,7 @@ COPY ./crontab /etc/cron.d/crontab
 RUN chmod 0644 /etc/cron.d/crontab
 RUN /usr/bin/crontab /etc/cron.d/crontab
 
-WORKDIR /app/code/magento2
+WORKDIR /opt/project/
 CMD ["php-fpm"]
 
 EXPOSE 9000

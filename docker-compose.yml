@@ -1,4 +1,4 @@
-version: "2.2"
+version: "2.3"
 
 services:
 
@@ -7,32 +7,57 @@ services:
       - php
     build:
       context: ./.docker/nginx
-    ports:
-      - "8080:80"
-      - "4443:443"
     volumes:
       - ~/.composer:/var/www/.composer:cached
       - ~/.ssh/id_rsa:/var/www/.ssh/id_rsa:cached
       - ~/.ssh/known_hosts:/var/www/.ssh/known_hosts:cached
-      - ./.docker/nginx/Config/projeto1.conf:/etc/nginx/conf.d/projeto1.conf:cached
-      - ./projeto1:/app/code/magento2/
-
+      - ./.docker/nginx/Config/project.conf:/etc/nginx/conf.d/project.conf:cached
+      - ./PROJECT:/opt/project/
     networks:
-      magento2_network:
-        aliases:
-          - local.m2.com.br
+      - magento2_network
+
+  varnish:
+    image: varnish:stable
+    container_name: varnish
+    volumes:
+      - "./.docker/varnish/varnish.vcl:/etc/varnish/default.vcl"
+    ports:
+      - "8040:80"
+    tmpfs:
+      - /var/lib/varnish:exec
+    environment:
+      - VARNISH_SIZE=2G
+    command: "-p default_keep=300"
+    depends_on:
+      - "nginx"
+    networks:
+      - magento2_network
 
   php:
     build:
-      context: ./.docker/php
+      context: .docker/php
+      dockerfile: Dockerfile-Project
     expose:
       - 9000
     volumes:
-      - $SSH_AUTH_SOCK:/ssh-agent
-      - $HOME/.ssh/known_hosts:/root/.ssh/known_hosts
-      - ./projeto1:/app/code/magento2/
-      - ./projeto1/auth.json:/usr/local/.composer/auth.json
+      - ./PROJECT:/opt/project/
+      - ./PROJECT/auth.json:/usr/local/.composer/auth.json
       - ./.docker/php/php.ini:/usr/local/etc/php/conf.d/php.ini
+    environment:
+      SSH_AUTH_SOCK: /ssh-agent
+    networks:
+      - magento2_network
+
+  phpcli:
+    build:
+      context: .docker/php-cli
+      dockerfile: Dockerfile-Project
+    expose:
+      - 9010
+    volumes:
+      - ./PROJECT:/opt/project/
+      - ./PROJECT/auth.json:/usr/local/.composer/auth.json
+      - ./.docker/php-cli/php.ini:/usr/local/etc/php/conf.d/php.ini
     environment:
       SSH_AUTH_SOCK: /ssh-agent
     networks:
@@ -47,30 +72,20 @@ services:
       - '443:443'
     links:
       - nginx
+      - varnish
     environment:
-      DOMAINS: 'local.projeto1.com.br -> http://nginx:80'
+      DOMAINS: 'local.magento2.com.br -> http://nginx:8040, local.magento2-store2.com.br -> http://nginx:8040'
       STAGE: 'local'
       FORCE_RENEW: 'false'
-    networks:
-      - magento2_network
-
-  cron:
-    build:
-      context: ./.docker/cron/
-      dockerfile: ./Dockerfile
-    entrypoint: [ "bash", "-c", "cron -f" ]
-    volumes:
-      - $SSH_AUTH_SOCK:/ssh-agent
-      - $HOME/.ssh/known_hosts:/root/.ssh/known_hosts
-      - ./projeto1:/app/code/magento2/
-      - ./projeto1/auth.json:/usr/local/.composer/auth.json
-      - ./.docker/php/php.ini:/usr/local/etc/php/conf.d/php.ini
+      PROXY_BUFFERS: '16 32k'
+      PROXY_BUFFER_SIZE: '32k'
+      CLIENT_MAX_BODY_SIZE: 64M
     networks:
       - magento2_network
 
   db:
-    image: mariadb:10.4
-    command: --max_allowed_packet=128M
+    image: mariadb:10.6
+    command: --max_allowed_packet=1G
 #    shm_size: 2gb
     ports:
       - "3306:3306"
@@ -82,7 +97,7 @@ services:
       - magento2_network
 
   rabbitmq:
-    image: rabbitmq:3.8.8-management
+    image: rabbitmq:3.11-management
     ports:
       - "15672:15672"
       - "5672:5672"
@@ -99,27 +114,20 @@ services:
     networks:
       - magento2_network
 
-  elasticsearch:
-    image: elasticsearch:7.6.0
-    environment:
-      - xpack.security.enabled=false
-      - xpack.monitoring.enabled=true
-      - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+  opensearch:
+    image: 'magento/magento-cloud-docker-opensearch:2.5-1.3.6'
     ulimits:
       memlock:
         soft: -1
         hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
-    cap_add:
-      - IPC_LOCK
+    environment:
+      - cluster.name=docker-cluster
+      - discovery.type=single-node
+      - discovery.seed_hosts=opensearch
+      - bootstrap.memory_lock=true
+      - DISABLE_SECURITY_PLUGIN=true
     ports:
-      - "9200:9200"
-      - "9300:9300"
-    volumes:
-      - elasticsearch-data:/usr/share/elasticsearch/data
+      - '9200:9200'
     networks:
       - magento2_network
 
@@ -141,17 +149,6 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
-    networks:
-      - magento2_network
-
-  kibana:
-    image: docker.elastic.co/kibana/kibana:7.6.0
-    environment:
-      ELASTICSEARCH_URL: http://elasticsearch:9200
-    depends_on:
-      - elasticsearch
-    ports:
-      - '5601:5601'
     networks:
       - magento2_network
 
