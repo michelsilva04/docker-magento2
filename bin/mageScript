@@ -1,9 +1,0 @@
-#!/bin/bash
-
-docker exec -it docker-magento2_redis_1 redis-cli flushall
-docker exec -it docker-magento2_php_1 php bin/magento app:config:import
-docker exec -it docker-magento2_php_1 php bin/magento setup:upgrade
-docker exec -it docker-magento2_php_1 php bin/magento indexer:reindex
-docker exec -it docker-magento2_php_1 php bin/magento setup:di:compile
-docker exec -it docker-magento2_php_1 php bin/magento cache:clean
-docker exec -it docker-magento2_php_1 php bin/magento cache:flush
