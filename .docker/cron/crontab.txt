@@ -1,5 +1,0 @@
-#~ MAGENTO START
-* * * * * /usr/bin/php /app/code/magento2/bin/magento cron:run | grep -v Ran jobs by schedule >> /app/code/magento2/var/log/magento.cron.log
-* * * * * /usr/bin/php /app/code/magento2/update/cron.php >> /app/code/magento2/var/log/update.cron.log
-* * * * * /usr/bin/php /app/code/magento2/bin/magento setup:cron:run >> /app/code/magento2/var/log/setup.cron.log
-#~ MAGENTO END

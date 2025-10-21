@@ -3,16 +3,19 @@ version: "2.3"
 services:
 
   nginx:
-    depends_on:
-      - php
     build:
       context: ./.docker/nginx
     volumes:
+      - $SSH_AUTH_SOCK:/ssh-agent
       - ~/.composer:/var/www/.composer:cached
       - ~/.ssh/id_rsa:/var/www/.ssh/id_rsa:cached
       - ~/.ssh/known_hosts:/var/www/.ssh/known_hosts:cached
-      - ./.docker/nginx/Config/project.conf:/etc/nginx/conf.d/project.conf:cached
-      - ./PROJECT:/opt/project/
+      - ./.docker/nginx/config/nginx-config.conf:/etc/nginx/conf.d/nginx-config.conf:cached
+      - ./Projeto:/opt/project/:consistent
+    depends_on:
+      - redis
+      - db
+      - php
     networks:
       - magento2_network
 
@@ -25,6 +28,8 @@ services:
       - "8040:80"
     tmpfs:
       - /var/lib/varnish:exec
+    extra_hosts:
+      - "magento-cloud-tunnel:host-gateway"
     environment:
       - VARNISH_SIZE=2G
     command: "-p default_keep=300"
@@ -36,37 +41,45 @@ services:
   php:
     build:
       context: .docker/php
-      dockerfile: Dockerfile-Project
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+      - db
     expose:
       - 9000
     volumes:
-      - ./PROJECT:/opt/project/
-      - ./PROJECT/auth.json:/usr/local/.composer/auth.json
+      - $SSH_AUTH_SOCK:/ssh-agent
+      - ~/.ssh/id_rsa:/root/.ssh/id_rsa:cached
+      - ~/.ssh/known_hosts:/root/.ssh/known_hosts:cached
       - ./.docker/php/php.ini:/usr/local/etc/php/conf.d/php.ini
-    environment:
-      SSH_AUTH_SOCK: /ssh-agent
+      - ./Projeto:/opt/project/:consistent
+      - ./Projeto/auth.json:/usr/local/.composer/auth.json
     networks:
       - magento2_network
 
   phpcli:
     build:
       context: .docker/php-cli
-      dockerfile: Dockerfile-Project
+      dockerfile: Dockerfile
+    depends_on:
+      - redis
+      - db
     expose:
       - 9010
     volumes:
-      - ./PROJECT:/opt/project/
-      - ./PROJECT/auth.json:/usr/local/.composer/auth.json
+      - $SSH_AUTH_SOCK:/ssh-agent
+      - ~/.ssh/id_rsa:/root/.ssh/id_rsa:cached
+      - ~/.ssh/known_hosts:/root/.ssh/known_hosts:cached
       - ./.docker/php-cli/php.ini:/usr/local/etc/php/conf.d/php.ini
-    environment:
-      SSH_AUTH_SOCK: /ssh-agent
+      - ./Projeto:/opt/project/:consistent
+      - ./Projeto/auth.json:/usr/local/.composer/auth.json
     networks:
       - magento2_network
 
   https-portal:
     image: steveltn/https-portal:1
     volumes:
-      - ./.docker/certs:/var/lib/https-portal
+      - ./.temp/certs:/var/lib/https-portal
     ports:
       - '80:80'
       - '443:443'
@@ -74,7 +87,7 @@ services:
       - nginx
       - varnish
     environment:
-      DOMAINS: 'local.magento2.com.br -> http://nginx:8040, local.magento2-store2.com.br -> http://nginx:8040'
+      DOMAINS: 'local.kuiper.com.br -> http://varnish:80'
       STAGE: 'local'
       FORCE_RENEW: 'false'
       PROXY_BUFFERS: '16 32k'
@@ -84,15 +97,22 @@ services:
       - magento2_network
 
   db:
-    image: mariadb:10.6
-    command: --max_allowed_packet=1G
-#    shm_size: 2gb
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password --max_allowed_packet=1G
+    #    shm_size: 2gb
     ports:
       - "3306:3306"
     env_file: ./.docker/db/db.env
     volumes:
-      - ./.docker/db/_data:/var/lib/mysql
-      - ./.docker/db/dump:/dump
+      - ./.temp/db/_data:/var/lib/mysql
+      - ./.temp/db/dump:/dump
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-pmagento"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
     networks:
       - magento2_network
 
@@ -115,7 +135,7 @@ services:
       - magento2_network
 
   opensearch:
-    image: 'magento/magento-cloud-docker-opensearch:2.5-1.3.6'
+    image: opensearchproject/opensearch:2.11.0
     ulimits:
       memlock:
         soft: -1
@@ -123,11 +143,9 @@ services:
     environment:
       - cluster.name=docker-cluster
       - discovery.type=single-node
-      - discovery.seed_hosts=opensearch
       - bootstrap.memory_lock=true
-      - DISABLE_SECURITY_PLUGIN=true
-    ports:
-      - '9200:9200'
+      - plugins.security.disabled=true
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
     networks:
       - magento2_network
 
@@ -137,9 +155,9 @@ services:
       - MONGO_DATA_DIR=/data/db
       - MONGO_LOG_DIR=/dev/null
     volumes:
-      - ./.docker/mongo/w_data:/data/db
+      - ./.temp/mongo/w_data:/data/db
     ports:
-        - 27017:27017
+      - 27017:27017
     networks:
       - magento2_network
 
